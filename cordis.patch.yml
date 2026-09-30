@@ -1,0 +1,15 @@
+# sidebar-terminal-tools bundle layer: inserts the plugin row at the ROOT
+# realm (do NOT move into any preset/isolate group — `terminalController`
+# lives in the web-app root realm and is only injectable from there).
+# Loaded by `dsh plugin --profile <name> add @huanlin/dsh-plugin-sidebar-terminal-tools`.
+# The `name` is the package entry; Loader resolves it from profile node_modules.
+- insert:
+    - id: sidebar-terminal-tools
+      name: '@huanlin/dsh-plugin-sidebar-terminal-tools'
+      config:
+        transcriptLines: 5000
+        transcriptBytes: 1048576
+        defaultTimeoutMs: 10000
+        minTimeoutMs: 100
+        maxTimeoutMs: 600000
+        pollIntervalMs: 150

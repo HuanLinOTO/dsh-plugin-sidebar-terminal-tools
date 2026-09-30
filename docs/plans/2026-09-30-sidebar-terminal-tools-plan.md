@@ -190,9 +190,60 @@
 
 ---
 
-## 侦察结果（Task 0 完成后追加）
+## 侦察结果（Task 0 完成后追加，2026-09-30）
 
-（待填：client 加载契约 / MessageId+inject 用法 / openTabIn 行为，含文件:行号）
+### 1. Client half 加载契约（Step 0.1）
+
+- `dsh.client = { platform: 'web', inject?: string[], external?: string[], immediately?: boolean }`；
+  `manifestVersion: 1` 为纯声明，安装器/加载器**不强制检查**（`packages/util/package-manifest/src/types.ts:30-39`、
+  `packages/util/package-manifest/README.md:93`）。
+- 声明了 `dsh.client` 的包**必须有** `exports["./client"]`（string 或含 string `default` 的一层条件对象），
+  否则 client-modules 启动抛错（`packages/client/modules/src/index.ts:194-205,845-848`）。
+- boot 图 entry **id == npm 包名**（`packages/client/modules/src/client/manifest.ts:54`「Entry name == package name」；
+  `index.ts:1040-1041` `graphRow(packageName, …)`）。client bundle 必须以
+  `window.__ModuleLoader__.load({ id: <npm 包名>, factory: (require) => exports })` 注册，id 必须与图行一致
+  （`manifest.ts:316-328` `ClientBundleRegistration`；对照 better-sidebar `lib/client.js:1-3`
+  `id: "dsh-better-sidebar"`）。factory 体**只注册工厂**，模块副作用在首次 materialize 时执行（`manifest.ts:9-16`）。
+- `dsh.client.inject` 是**包名依赖边**（该包工厂须先到达 + cordis entry 组合用），不是服务注入；
+  服务名写在 client 插件对象自己的 `inject` 数组（better-sidebar `src/client/index.tsx:49`
+  `inject = ['slots','sessions','locale','modules',…]`）。`external` 声明 runtime module 请求（baseline 之外）；
+  **type-only import 被擦除、不产生请求**（package-manifest `types.ts:88-93`）。terminal-controller 自身
+  `external: ["@deepseek-ai/dsh-api-gateway/client"]` 因其 client bundle runtime import gateway；本插件 client half
+  对宿主包仅 type import → 无需 `external`。
+- 修订（Task 1.1 依据）：`dsh.client.inject = ["@deepseek-ai/dsh-api-terminal-controller",
+  "@deepseek-ai/dsh-client-ui-sidebar-right", "@deepseek-ai/dsh-client-locale"]`，`manifestVersion: 1` 保留。
+
+### 2. `MessageId` + `agent.inject` 用法（Step 0.2，模板照抄）
+
+- `MessageSourceMap` 自行 declare（`packages/jobs/tool-jobs/src/index.ts:24-28`）：
+  `declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap { 'sidebar-terminal-tools': { kind: 'sidebar-terminal-tools' } & ContextFormed } }`
+- 消息构造（`tool-jobs/src/index.ts:284-307`）：`createUserMessage({ content: [{ type:'text', text }],
+  source: { kind: 'sidebar-terminal-tools', form: 'notice', summary } })` 然后 `owner.inject(message)`。
+  **`MessageId` 不用自己生成**：`createUserMessage`（`packages/llm/llm/src/message.ts:246-249`）内部经
+  `createMessage` 用 `randomUUID()` 打 id（`message.ts:226`）。
+- `summary` 用 `boundContextSummary`（`message.ts:129-133`）截到 120 字符（`CONTEXT_SUMMARY_MAX_CHARS`，
+  `message.ts:122`）；`ContextFormed` 为 `{ form:'notice' } | { form:'relay' } | { form:'recall' }`
+  （`message.ts:98-101`）。`inject` 不唤醒空闲 agent（设计文档已核实）。
+
+### 3. `openTabIn` 行为（Step 0.3）
+
+- 签名 `openTabIn(sessionId, kind, { params, …placement })`（`packages/client/ui-sidebar-right/src/client/service.ts:354-357`）
+  → `placeTab`（:394-404，未注册的 kind 抛错）→ `place`（:407-444）→ `actions.openContent` + `tabDomain.navigate`。
+- `openContent` 的 layout ops 固定含 `planSetExpanded(state, true)`（`packages/client/ui-sidebar-right/src/client/stores.ts:308-311`）：
+  **会展开右侧栏列**并把 tab 激活到所在 pane（上游语义「an open behind a collapsed panel is not an open」，
+  `stores.ts:304-307`），但**不抢 DOM 键盘焦点**（路径上无 `openWithFocus`/`focus` 调用）。**没有**「后台打开」选项——
+  自动出现正是本插件目标，行为可接受，README 注明。
+- 官方恢复模板（被注释掉的前例，`packages/client/ui-sidebar-terminal/src/client/index.ts:102-122`）：
+  `ctx.webTerminals.recover(sessionId).then(terminals => { for (const info of terminals)
+  ctx.sidebarRight.openTabIn(sessionId, 'terminal', { params: { terminalId: info.id } }) })`。
+- `recover(sessionId)`（`packages/api/terminal-controller/src/client/index.ts:190-196`）：`remote.list` 后滤掉本窗口
+  已有视图（held）、未完成关闭、已关闭的 —— **自带去重**；`stb-` 过滤叠加在其结果上即可。
+- 会话枚举：`ctx.sidebarRight.openTabs` 是 `ObservableSnapshot<readonly { sessionId, tabId, kind, contentId }[]>`
+  （`packages/client/ui-sidebar-right/src/client/tab-inventory.ts:8-20`，覆盖已保存+已采纳会话）；
+  `ctx.sidebarRight.mounted` 为当前挂载会话。`openTabIn` 对 store 未采纳的会话**静默无操作**（`service.ts:334-336`）。
+- 客户端服务名：`webTerminals`（terminal-controller `client/index.ts:56`）、`sidebarRight`
+  （ui-sidebar-right `client/index.ts:123`）、locale 词典 `ctx.locale.register(ns, { zh, en })`
+  （ui-sidebar-terminal `client/index.ts:70` 前例）。
 
 ## 清理记录（已完成 2026-09-30）
 
