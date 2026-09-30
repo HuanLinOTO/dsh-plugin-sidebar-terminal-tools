@@ -30,15 +30,15 @@
 
 **Files:** Modify: 本文件（追加「侦察结果」）
 
-- [ ] **Step 0.1** 读 DSH loader 对 bundle client half 的加载契约：`dsh.client` 字段、
+- [x] **Step 0.1** 读 DSH loader 对 bundle client half 的加载契约：`dsh.client` 字段、
   client bundle 的 `window.__ModuleLoader__.load({ id })` 里 id 与包名的关系、`manifestVersion` 要求。
   对照 `~/.dsh/profiles/web/node_modules/dsh-better-sidebar`（package.json 的 `dsh` 块 + lib/client.js 头）。
   参考源码：`packages/bundle/*/`、`apps/cli`、`packages/host`。
-- [ ] **Step 0.2** 读 `packages/jobs/tool-jobs/src/index.ts` 的 `owner.inject(message)` 用法：
+- [x] **Step 0.2** 读 `packages/jobs/tool-jobs/src/index.ts` 的 `owner.inject(message)` 用法：
   `MessageId` 生成、`MessageSourceMap` declare、`ContextFormed.form='notice'` 的 message 构造。抄成模板。
-- [ ] **Step 0.3** 读 `ctx.sidebarRight.openTabIn` 实现（`packages/client/ui-sidebar-right/src`）：
+- [x] **Step 0.3** 读 `ctx.sidebarRight.openTabIn` 实现（`packages/client/ui-sidebar-right/src`）：
   是否抢焦点/展开面板、能否后台开。
-- [ ] **Step 0.4** 用自己的话把三个结论追加到本文件末尾「侦察结果」，含文件:行号。
+- [x] **Step 0.4** 用自己的话把三个结论追加到本文件末尾「侦察结果」，含文件:行号。
 
 ### Task 1: 仓库骨架
 
@@ -50,7 +50,7 @@
 **Interfaces → Produces:** 能 `pnpm install / test / typecheck / build` 的双 half 工程；
 `package.json` 含 `dsh.bundle.patch` 与 `dsh.client`。
 
-- [ ] **Step 1.1** 写 `package.json`：
+- [x] **Step 1.1** 写 `package.json`：
   ```jsonc
   {
     "name": "@huanlin/dsh-plugin-sidebar-terminal-tools",
@@ -86,10 +86,10 @@
   }
   ```
   `dsh.client.inject` 的确切清单与 `manifestVersion` 以 Task 0.1 结论为准修订。
-- [ ] **Step 1.2** host `tsdown.config.ts`：entry `src/index.ts`，externals 三个 peer；client 配置：
+- [x] **Step 1.2** host `tsdown.config.ts`：entry `src/index.ts`，externals 三个 peer；client 配置：
   entry `src/client/index.ts` → `lib/client.js`，externals = client peer + `@deepseek-ai/*` 全部宿主包，
   产物以 `window.__ModuleLoader__.load({ id: <按 Task 0.1>, factory })` 包裹（参照 better-sidebar 产物写法）。
-- [ ] **Step 1.3** `cordis.patch.yml`（根级 insert，**不要**放进任何 preset/isolate 组——`terminalController` 在根 realm）：
+- [x] **Step 1.3** `cordis.patch.yml`（根级 insert，**不要**放进任何 preset/isolate 组——`terminalController` 在根 realm）：
   ```yaml
   - insert:
       - id: sidebar-terminal-tools
@@ -101,8 +101,8 @@
           maxTimeoutMs: 600000
           pollIntervalMs: 150
   ```
-- [ ] **Step 1.4** `pnpm install`；`pnpm test` 空跑通过（无测试文件时 vitest 0 例也算通过）。
-- [ ] **Step 1.5** Commit `chore: scaffold sidebar-terminal-tools`。
+- [x] **Step 1.4** `pnpm install`；`pnpm test` 空跑通过（无测试文件时 vitest 0 例也算通过）。
+- [x] **Step 1.5** Commit `chore: scaffold sidebar-terminal-tools`。
 
 ### Task 2: 取回 wait_for 核心
 
@@ -110,10 +110,10 @@
 - 来源：`https://github.com/huanlinoto/dsh-plugin-terminal-extension-wait-for` commit `4dae4b8`，
   文件 `src/wait-for.ts` 与 `tests/wait-for.spec.ts`。
 
-- [ ] **Step 2.1** `git clone --depth 1 https://github.com/huanlinoto/dsh-plugin-terminal-extension-wait-for <tmp>`
+- [x] **Step 2.1** `git clone --depth 1 https://github.com/huanlinoto/dsh-plugin-terminal-extension-wait-for <tmp>`
   并 `git checkout 4dae4b8`，把两个文件拷入新仓库（保持相对路径）。
-- [ ] **Step 2.2** `pnpm test`：23 例全绿（若 import 路径需调整，只改路径不改断言）。
-- [ ] **Step 2.3** Commit `feat: import wait_for core from previous plugin`。
+- [x] **Step 2.2** `pnpm test`：23 例全绿（若 import 路径需调整，只改路径不改断言）。
+- [x] **Step 2.3** Commit `feat: import wait_for core from previous plugin`。
 
 ### Task 3: 端点核心 `src/endpoint.ts`（TDD）
 
@@ -123,7 +123,7 @@
 `mintTerminalId(n)`、`TranscriptBuffer`（append/read 分页）、`attachFollower(...)`（消费 follow 流）、
 `detectControllerChange(state)`、`buildUserNotice(...)`。
 
-- [ ] **Step 3.1 失败测试**（mock 一个结构化的 controller：`create/follow/write/close/list`，`follow` 返回
+- [x] **Step 3.1 失败测试**（mock 一个结构化的 controller：`create/follow/write/close/list`，`follow` 返回
   可脚本化推送帧的 async iterable）：
   - id 生成符合 `/^stb-[\w-]{1,120}$/` 且单调不回退
   - 转录：ANSI 清除、行/字节双重有界、分页读、wait_for 命中（复用 Task 2 核心）
@@ -131,11 +131,11 @@
     `regained_control: true`；模拟用户接管（推送 `state` 帧 controllerId=他人）→ 生成 inject 提醒一次
     （不重复刷屏：同一接管会话只提醒一次）
   - 退出：`state=exited` 后 wait_for 返回 exited；`close` 后注册表移除、follow 消费者退出
-- [ ] **Step 3.2** `pnpm test` 失败（模块不存在）。
-- [ ] **Step 3.3 实现**：`sanitize.ts`（CSI/OSC/单字符控制码剥离；保留 `\n`）、`registry.ts`、
+- [x] **Step 3.2** `pnpm test` 失败（模块不存在）。
+- [x] **Step 3.3 实现**：`sanitize.ts`（CSI/OSC/单字符控制码剥离；保留 `\n`）、`registry.ts`、
   `endpoint.ts`（见设计文档「Host half/数据面」；follow 背压：逐帧立即处理不留队列）。
-- [ ] **Step 3.4** `pnpm test` 全绿；`pnpm run typecheck` 干净。
-- [ ] **Step 3.5** Commit `feat: controller bridge core with transcript and control handling`。
+- [x] **Step 3.4** `pnpm test` 全绿；`pnpm run typecheck` 干净。
+- [x] **Step 3.5** Commit `feat: controller bridge core with transcript and control handling`。
 
 ### Task 4: 工具注册 `src/tools.ts` + 入口 `src/index.ts`（TDD）
 
@@ -144,14 +144,14 @@
 **Interfaces → Consumes:** Task 3 的 `EndpointRegistry`；**Produces:** `sidebar_terminal_open/send/read/wait_for/close/list`
 （schema 与结果五态见设计文档；oneOf 五态复用旧插件的 schema 形状）。
 
-- [ ] **Step 4.1 失败测试**（mock `@deepseek-ai/dsh-tools` 的 `defineTool`，同旧插件做法）：
+- [x] **Step 4.1 失败测试**（mock `@deepseek-ai/dsh-tools` 的 `defineTool`，同旧插件做法）：
   注册恰好 6 个工具、名字与参数正确；每工具 execute 对一个 fake controller 端到端可用（open→send→read→
   wait_for→list→close）；owner 隔离（另一个 agent 拿不到别人的 id）；`limit_reached` 映射为 canonical 值。
-- [ ] **Step 4.2** `pnpm test` 失败。
-- [ ] **Step 4.3 实现** `tools.ts`（薄适配：解析参数 → registry 调用 → 规范值）+ `index.ts`
+- [x] **Step 4.2** `pnpm test` 失败。
+- [x] **Step 4.3 实现** `tools.ts`（薄适配：解析参数 → registry 调用 → 规范值）+ `index.ts`
   （`Config` Schemastery + `resolveConfig` fail loud + `apply`：`inject = ['terminalController','tools']`）。
-- [ ] **Step 4.4** `pnpm test` 全绿 + typecheck 干净 + `pnpm run build` 出 `lib/index.js`（host 半产物 extenals 正确）。
-- [ ] **Step 4.5** Commit `feat: sidebar_terminal_* tools`。
+- [x] **Step 4.4** `pnpm test` 全绿 + typecheck 干净 + `pnpm run build` 出 `lib/index.js`（host 半产物 extenals 正确）。
+- [x] **Step 4.5** Commit `feat: sidebar_terminal_* tools`。
 
 ### Task 5: Client half `src/client/index.ts`（纯函数 TDD）
 
@@ -160,21 +160,21 @@
 **Interfaces → Consumes:** `ctx.webTerminals.recover(sessionId)`、`ctx.sidebarRight.openTabIn(...)`;
 **Produces:** `pickUnopened(prefix, recovered, openedIds)` 与自动打开循环。
 
-- [ ] **Step 5.1 失败测试**：只挑 `stb-` 前缀、跳过已在视图/已关闭的、去重、空输入不产 tab。
-- [ ] **Step 5.2** `pnpm test` 失败。
-- [ ] **Step 5.3 实现**：`pick.ts` 纯函数；`index.ts` 轮询（默认 3s，`ctx.effect` 清理）对
+- [x] **Step 5.1 失败测试**：只挑 `stb-` 前缀、跳过已在视图/已关闭的、去重、空输入不产 tab。
+- [x] **Step 5.2** `pnpm test` 失败。
+- [x] **Step 5.3 实现**：`pick.ts` 纯函数；`index.ts` 轮询（默认 3s，`ctx.effect` 清理）对
   `sidebarRight.openTabs` 里的 session 调 `recover`，`openTabIn` 按 Task 0.3 结论选择不抢焦点的方式；
   文案入 locale 词典（zh/en）。
-- [ ] **Step 5.4** `pnpm test` 全绿 + `pnpm run build` 出 `lib/client.js` 且包裹写法符合 Task 0.1 契约。
-- [ ] **Step 5.5** Commit `feat: client half auto-opens model terminals in the native sidebar`。
+- [x] **Step 5.4** `pnpm test` 全绿 + `pnpm run build` 出 `lib/client.js` 且包裹写法符合 Task 0.1 契约。
+- [x] **Step 5.5** Commit `feat: client half auto-opens model terminals in the native sidebar`。
 
 ### Task 6: 构建、README、合规
 
-- [ ] **Step 6.1** README：顶部 dshfind card（`huanlinoto/dsh-plugin-sidebar-terminal-tools`）、
+- [x] **Step 6.1** README：顶部 dshfind card（`huanlinoto/dsh-plugin-sidebar-terminal-tools`）、
   中英功能说明、**安全警告**（系统用户权限/绕过沙箱/共享配额/建议 permission 加闸）、开发/运行/检查三节、
   挂载位置说明（根级，不进 preset realm）。
-- [ ] **Step 6.2** 合规自检：零源码 patch、B1-B3、F1-F3、A6 不导出 default、测试分层（Unit）、`npm pack --dry-run` 清单。
-- [ ] **Step 6.3** Commit `docs: README and compliance pass`。
+- [x] **Step 6.2** 合规自检：零源码 patch、B1-B3、F1-F3、A6 不导出 default、测试分层（Unit）、`npm pack --dry-run` 清单。
+- [x] **Step 6.3** Commit `docs: README and compliance pass`。
 
 ### Task 7: 发布与挂载
 
