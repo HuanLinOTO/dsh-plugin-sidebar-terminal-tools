@@ -40,7 +40,7 @@ const clientConfig: UserConfig = {
   dts: false,
   sourcemap: false,
   clean: false,
-  external: PLATFORM_MODULES,
+  deps: { neverBundle: PLATFORM_MODULES },
   outputOptions: {
     entryFileNames: 'client.js',
     banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(ID)}, factory: (require) => {`,

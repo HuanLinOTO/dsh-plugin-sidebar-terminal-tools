@@ -157,3 +157,9 @@ export function makeAgent(id: string): { id: string; inject: ReturnType<typeof v
   const inject = vi.fn()
   return { id, inject }
 }
+
+/** Let the background follow consumer drain queued frames (microtask + macrotask). */
+export async function settle(): Promise<void> {
+  await new Promise(resolve => { setTimeout(resolve, 0) })
+  await new Promise(resolve => { setTimeout(resolve, 0) })
+}

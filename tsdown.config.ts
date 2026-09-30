@@ -23,7 +23,7 @@ const libConfig: UserConfig = {
   fixedExtension: false,
   dts: true,
   clean: true,
-  external: HOST_EXTERNALS,
+  deps: { neverBundle: HOST_EXTERNALS },
 }
 
 export default defineConfig([libConfig])
