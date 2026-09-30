@@ -178,10 +178,10 @@
 
 ### Task 7: 发布与挂载
 
-- [ ] **Step 7.1** `gh repo create huanlinoto/dsh-plugin-sidebar-terminal-tools --public --source . --push`；
-  双语描述 + topic `dsh-plugin`。
+- [x] **Step 7.1** `gh repo create huanlinoto/dsh-plugin-sidebar-terminal-tools --public --source . --push`；
+  双语描述 + topic `dsh-plugin`。（已完成：https://github.com/HuanLinOTO/dsh-plugin-sidebar-terminal-tools）
 - [ ] **Step 7.2** `dsh plugin --profile web add link:D:\Projects\deepseek-harness\dsh-plugin-sidebar-terminal-tools`；
-  重启 `dsh web`（人类）+ 硬刷新。
+  重启 `dsh web`（人类）+ 硬刷新。（add/bundle 注册/安装副本契约自检已完成；`dsh web` PID 8420 为装插件前启动，待重启）
 - [ ] **Step 7.3** 真机实测：模型 `sidebar_terminal_open` → 侧栏应自动出现终端 tab →
   `sidebar_terminal_send("ping -n 4 127.0.0.1")` → `sidebar_terminal_wait_for("(Ping 统计|丢失)")` →
   用户点「接管」输入一条命令 → 模型下一条 `sidebar_terminal_read` 应看到用户命令与一条提醒注入。
