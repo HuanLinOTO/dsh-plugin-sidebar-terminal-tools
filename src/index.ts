@@ -17,7 +17,7 @@
  * business outcomes as values, C6 signal honored at every await.
  *
  * Tool registration is effect-based: disposing the plugin fiber (config
- * change, unload) unregisters the tools, aborts every follow consumer, and
+ * change, unload) unregisters the tools, disposes every attachment, and
  * the next apply() rebuilds from the fresh config.
  *
  * @module @huanlin/dsh-plugin-sidebar-terminal-tools
@@ -26,6 +26,7 @@ import z from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
 import { createEndpoint, type EndpointCoreConfig } from './endpoint.js'
 import { EndpointRegistry } from './registry.js'
+import { terminalSurfaceOf } from './shadow.js'
 import { registerTools } from './tools.js'
 
 export const name = 'sidebar-terminal-tools'
@@ -112,9 +113,9 @@ export function resolveConfig(config: Config = {}): EndpointCoreConfig {
 export function apply(ctx: Context, config: Config = {}): void {
   const resolved = resolveConfig(config)
   const registry = new EndpointRegistry()
-  const endpoint = createEndpoint(ctx.terminalController, registry, resolved)
-  // Plugin fiber disposal (config change, unload) aborts every follow
-  // consumer; the controller then reclaims its terminals per Session owner.
+  const endpoint = createEndpoint(terminalSurfaceOf(ctx), registry, resolved)
+  // Plugin fiber disposal (config change, unload) disposes every attachment
+  // channel; the controller then reclaims its terminals per Session owner.
   ctx.effect(() => () => { registry.dispose() }, 'sidebar-terminal-tools: registry disposal')
   registerTools(ctx, { endpoint, config: resolved })
 }

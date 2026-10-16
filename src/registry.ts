@@ -6,6 +6,7 @@
  *
  * @module @huanlin/dsh-plugin-sidebar-terminal-tools/registry
  */
+import type { AttachmentChannel } from './attachment.js'
 import type { TerminalOwnerLike, WebTerminalInfoShadow } from './shadow.js'
 import type { TerminalReadResult } from './wait-for.js'
 
@@ -14,17 +15,6 @@ export const TERMINAL_ID_PREFIX = 'stb-'
 
 /** Terminal identity rule of the controller, mirrored (`/^[\w-]{1,128}$/`). */
 const CONTROLLER_ID_RE = /^[\w-]{1,128}$/
-
-let attachmentCounter = 0
-
-/**
- * Mint one attachment identity for a follow subscription. Re-following with a
- * fresh identity is what reclaims exclusive input control.
- */
-export function mintAttachmentId(): string {
-  attachmentCounter += 1
-  return `stb-att-${attachmentCounter}-${Math.random().toString(36).slice(2, 10)}`
-}
 
 /**
  * Mint the model-facing terminal id for registry sequence `seq`
@@ -57,7 +47,7 @@ export interface TranscriptLimits {
 }
 
 /**
- * A line/byte-bounded plain-text transcript fed by the follow consumer.
+ * A line/byte-bounded plain-text transcript fed by the attachment consumer.
  * `read` pages with newest-relative offsets (the contract `scanPage` in
  * wait-for.ts expects); an unterminated pending tail counts as the newest
  * line so live prompts stay matchable.
@@ -157,12 +147,12 @@ export class TranscriptBuffer {
 export interface ManagedTerminal {
   /** Latest metadata, updated by every snapshot/state frame. */
   info: WebTerminalInfoShadow
-  /** The attachment identity our current follow consumer uses. */
-  attachmentId: string
+  /** Whether the live attachment holds input control (latest snapshot/state frame). */
+  writable: boolean
   /** Sanitized, bounded transcript; the wait_for matching space. */
   readonly transcript: TranscriptBuffer
-  /** Aborts the follow consumer (close, regain, plugin dispose); replaced on re-follow. */
-  follow: AbortController
+  /** The live attachment channel; replaced on re-attach, disposed on close/plugin dispose. */
+  attachment: AttachmentChannel | null
   /** True while a takeover notice for the current episode was already sent. */
   takeoverNotified: boolean
 }
@@ -219,9 +209,9 @@ export class EndpointRegistry {
     if (existing !== undefined) return existing
     const managed: ManagedTerminal = {
       info,
-      attachmentId: '',
+      writable: true,
       transcript: new TranscriptBuffer(limits),
-      follow: new AbortController(),
+      attachment: null,
       takeoverNotified: false,
     }
     owner.terminals.set(terminalId, managed)
@@ -237,10 +227,10 @@ export class EndpointRegistry {
     return removed
   }
 
-  /** Abort every follow consumer and clear all records (plugin dispose). */
+  /** Dispose every attachment channel and clear all records (plugin dispose). */
   dispose(): void {
     for (const owner of this.owners.values()) {
-      for (const managed of owner.terminals.values()) managed.follow.abort()
+      for (const managed of owner.terminals.values()) managed.attachment?.dispose()
     }
     this.owners.clear()
   }

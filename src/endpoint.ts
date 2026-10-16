@@ -1,9 +1,10 @@
 /**
  * The endpoint core: operations over the shadowed terminal controller and the
  * owner-scoped registry. Every operation runs against terminals this plugin
- * created; `send` regains control by re-following when the user holds it; the
- * follow consumer maintains the sanitized transcript and fires (once per
- * episode) an inject notice when the user takes over.
+ * created; `send` regains control by re-attaching when the user holds it; the
+ * attachment consumer maintains the sanitized transcript, settles write
+ * acknowledgements, and fires (once per episode) an inject notice when the
+ * user takes over.
  *
  * Conventions (plugin-development-guide.md §3):
  *   C4 — operations return canonical JSON values; rendering lives in tools.ts.
@@ -14,9 +15,10 @@
  * @module @huanlin/dsh-plugin-sidebar-terminal-tools/endpoint
  */
 import { boundContextSummary, createUserMessage, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
-import { EndpointRegistry, mintAttachmentId, mintTerminalId, type ManagedTerminal } from './registry.js'
+import { AttachmentChannel } from './attachment.js'
+import { EndpointRegistry, mintTerminalId, type ManagedTerminal } from './registry.js'
 import { sanitizeTerminalText } from './sanitize.js'
-import { remoteErrorCode, remoteErrorDetails, type TerminalControllerLike, type TerminalFrameShadow, type TerminalOwnerLike, type WebTerminalInfoShadow } from './shadow.js'
+import { remoteErrorCode, remoteErrorDetails, type TerminalFrameShadow, type TerminalOwnerLike, type TerminalSurface, type WebTerminalInfoShadow } from './shadow.js'
 import { compilePattern, resolveTimeoutMs, sleepWithAbort, waitForPattern, type TerminalReadResult, type TerminalSessionSnapshot, type WaitOutcome } from './wait-for.js'
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -87,14 +89,17 @@ export interface TerminalSummary {
 }
 
 /**
- * Classify who holds input control in a state frame.
+ * Classify who holds input control in one attachment frame.
  * @param info - the frame's terminal metadata.
- * @param ourAttachment - the attachment identity our consumer follows with.
- * @returns 'user' when someone else controls, 'ours' when we do, 'unattached' otherwise.
+ * @param writable - whether this attachment holds input control (the frame's
+ * writability bit; upstream replaced `info.controllerId` with it).
+ * @returns 'user' when someone else controls a running terminal, 'ours' when
+ * this attachment does, 'unattached' once the process left the running state
+ * (input control is meaningless there).
  */
-export function detectControllerChange(info: WebTerminalInfoShadow, ourAttachment: string): 'user' | 'ours' | 'unattached' {
-  if (info.controllerId === undefined) return 'unattached'
-  return info.controllerId === ourAttachment ? 'ours' : 'user'
+export function detectControllerChange(info: WebTerminalInfoShadow, writable: boolean): 'user' | 'ours' | 'unattached' {
+  if (writable) return 'ours'
+  return info.state === 'running' ? 'user' : 'unattached'
 }
 
 /** The takeover reminder the model receives via `agent.inject`. */
@@ -132,33 +137,36 @@ function statusOf(info: WebTerminalInfoShadow): TerminalSessionSnapshot['status'
 }
 
 /**
- * Start (or restart) the background follow consumer for one managed terminal.
- * Each frame is processed as it arrives — no queueing between frames — which
- * is the backpressure answer for the controller's 2 MiB per-follower cap.
+ * Start (or restart) the background attachment consumer for one managed
+ * terminal. Each frame is processed as it arrives — no queueing between
+ * frames — which is the backpressure answer for the controller's 2 MiB
+ * per-follower cap; `ack` frames settle the channel's write waiters.
  * @returns a latch that settles once the baseline snapshot was processed (or
  * the stream ended/failed before one arrived).
  */
-function attachFollower(
-  controller: TerminalControllerLike,
+function attachAttachment(
+  surface: TerminalSurface,
   registry: EndpointRegistry,
   owner: OwnerAgent,
   terminalId: string,
   managed: ManagedTerminal,
   config: EndpointCoreConfig,
 ): Promise<void> {
-  managed.follow.abort()
-  managed.follow = new AbortController()
-  const attachmentId = mintAttachmentId()
-  managed.attachmentId = attachmentId
+  // Disposing the previous channel first drops its queued frames with it:
+  // the control broadcast our own re-attach causes must not reach the old
+  // consumer (that would double-append output and self-notify a takeover).
+  managed.attachment?.dispose()
+  const channel = new AttachmentChannel()
+  managed.attachment = channel
   managed.takeoverNotified = false
   let settleStarted!: () => void
   const started = new Promise<void>(resolve => { settleStarted = resolve })
-  const signal = managed.follow.signal
+  const signal = channel.abort.signal
 
   void (async () => {
     let first = true
     try {
-      const iterator = controller.follow(owner, terminalId, attachmentId, signal)[Symbol.asyncIterator]()
+      const iterator = surface.attach(owner, terminalId, channel.input, signal)[Symbol.asyncIterator]()
       const onAbort = (): void => { void iterator.return?.(undefined) }
       signal.addEventListener('abort', onAbort, { once: true })
       try {
@@ -168,12 +176,14 @@ function attachFollower(
           const frame: TerminalFrameShadow = next.value
           if (frame.type === 'snapshot') {
             managed.info = frame.info
+            managed.writable = frame.writable
             managed.transcript.replace(sanitizeTerminalText(frame.screen))
           } else if (frame.type === 'output') {
             managed.transcript.append(sanitizeTerminalText(frame.data))
-          } else {
+          } else if (frame.type === 'state') {
             managed.info = frame.info
-            const control = detectControllerChange(frame.info, attachmentId)
+            managed.writable = frame.writable
+            const control = detectControllerChange(frame.info, frame.writable)
             if (control === 'user' && !managed.takeoverNotified) {
               managed.takeoverNotified = true
               try {
@@ -184,6 +194,8 @@ function attachFollower(
             } else if (control === 'ours') {
               managed.takeoverNotified = false
             }
+          } else {
+            channel.settleAck(frame)
           }
           if (first) {
             first = false
@@ -197,6 +209,7 @@ function attachFollower(
       // Stream failure (terminal closed underneath, owner disposed): the last
       // known info/transcript stay readable; the tools surface them as-is.
     } finally {
+      channel.end(new Error(`terminal ${terminalId} attachment ended before the write was acknowledged`))
       if (first) settleStarted()
     }
   })()
@@ -228,13 +241,14 @@ export interface Endpoint {
 }
 
 /**
- * Compose the endpoint core over one controller and registry.
- * @param controller - the shadowed `ctx.terminalController`.
+ * Compose the endpoint core over one controller surface and registry.
+ * @param surface - the shadowed `ctx.terminalController` (attach carries the
+ * synthesized invocation's uplink; see `terminalSurfaceOf`).
  * @param registry - this plugin's owner-scoped terminal registry.
  * @param config - resolved bounds.
  */
 export function createEndpoint(
-  controller: TerminalControllerLike,
+  surface: TerminalSurface,
   registry: EndpointRegistry,
   config: EndpointCoreConfig,
 ): Endpoint {
@@ -247,7 +261,7 @@ export function createEndpoint(
       const terminalId = mintTerminalId(registry.nextSequence())
       let info: WebTerminalInfoShadow
       try {
-        info = await controller.create(
+        info = await surface.create(
           owner,
           { id: terminalId, cols, rows, ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }) },
           new AbortController().signal,
@@ -264,7 +278,7 @@ export function createEndpoint(
         throw error
       }
       const managed = registry.register(owner, terminalId, info, limits)
-      await attachFollower(controller, registry, owner, terminalId, managed, config)
+      await attachAttachment(surface, registry, owner, terminalId, managed, config)
       return {
         outcome: 'opened',
         terminalId,
@@ -281,16 +295,21 @@ export function createEndpoint(
       const managed = registry.get(owner.id, terminalId)
       if (managed === undefined) throw unknownTerminal(owner.id, terminalId)
       const payload = options?.enter === false ? text : `${text}\r`
+      const channel = managed.attachment
+      if (channel === null) throw new Error(`terminal ${terminalId} has no attachment; open it with sidebar_terminal_open`)
       let regainedControl = false
       try {
-        await controller.write(owner, terminalId, managed.attachmentId, payload)
+        await channel.writeText(payload)
       } catch (error) {
         if (remoteErrorCode(error) !== 'terminal/control-unavailable') throw error
-        // The user (or another view) holds input control: re-follow to
-        // reclaim it, then deliver the write under the fresh attachment.
+        // The user (or another view) holds input control, or the attachment
+        // died: re-attach to reclaim it, then deliver the write under the
+        // fresh attachment.
         regainedControl = true
-        await attachFollower(controller, registry, owner, terminalId, managed, config)
-        await controller.write(owner, terminalId, managed.attachmentId, payload)
+        await attachAttachment(surface, registry, owner, terminalId, managed, config)
+        const fresh = managed.attachment
+        if (fresh === null) throw new Error(`terminal ${terminalId} lost its re-attachment; retry the send`)
+        await fresh.writeText(payload)
       }
       return { wrote: payload.length, regained_control: regainedControl, state: managed.info.state }
     },
@@ -329,20 +348,20 @@ export function createEndpoint(
       const managed = registry.get(owner.id, terminalId)
       if (managed === undefined) throw unknownTerminal(owner.id, terminalId)
       try {
-        await controller.close(owner, terminalId)
+        await surface.close(owner, terminalId)
       } catch (error) {
         // Already-closed identities are a success here (close is idempotent
         // upstream); everything else is a real failure.
         if (remoteErrorCode(error) !== 'terminal/unavailable') throw error
       }
-      managed.follow.abort()
+      managed.attachment?.dispose()
       registry.remove(owner.id, terminalId)
       return { closed: true, terminalId }
     },
 
     list(owner) {
       return registry.list(owner.id).map((managed): TerminalSummary => {
-        const control = detectControllerChange(managed.info, managed.attachmentId)
+        const control = detectControllerChange(managed.info, managed.writable)
         return {
           terminalId: managed.info.id,
           title: managed.info.title,

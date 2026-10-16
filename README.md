@@ -67,7 +67,7 @@ Client half（web 客户端配置层）可配 `pollIntervalMs`（侧栏自动打
 
 ## 架构 / Architecture
 
-- **Host half**（`src/index.ts` + `endpoint/registry/sanitize/wait-for`）：结构影子类型消费 `ctx.terminalController`（**不 import** `@deepseek-ai/dsh-api-terminal-controller`）；每条终端一个 follow 消费者，`snapshot`/`output` 经 ANSI 清洗进有界转录，`state` 帧维护 `state/exitCode/controllerId` 并在用户接管时 `agent.inject` 一条提醒（同一接管会话只提醒一次）。
+- **Host half**（`src/index.ts` + `endpoint/attachment/registry/sanitize/wait-for`）：结构影子类型消费 `ctx.terminalController`（**不 import** `@deepseek-ai/dsh-api-terminal-controller`）；每条终端一个 duplex `attach` 消费者（host 侧经合成 Remote invocation——gateway 分发同款 `ctx.extend` 机制——取得 `RemoteStream`，编号 `TerminalInput` 命令上行、`snapshot`/`output`/`state`/`ack` 帧下行），`snapshot`/`output` 经 ANSI 清洗进有界转录，`state` 帧维护 `state/exitCode` 并以 `writable` 位判定输入控制权（0.2.1 起上游移除 `info.controllerId`），用户接管时 `agent.inject` 一条提醒（同一接管会话只提醒一次）。
 - **Client half**（`src/client/`，产物 `lib/client.js` 以 `window.__ModuleLoader__.load({ id: <package name>, factory })` 注册）：轮询 `ctx.webTerminals.recover()`，把 `stb-` 前缀终端用 `ctx.sidebarRight.openTabIn()` 开成官方 terminal tab。`openTabIn` 会展开侧栏列但**不抢键盘焦点**；上游本就把它设计为"打开即可见"。
 - 上游若在未来版本提供官方自动恢复，client half 应退役，只保留工具层。
 

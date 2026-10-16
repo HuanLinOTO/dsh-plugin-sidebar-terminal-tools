@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { EndpointRegistry, TranscriptBuffer, mintTerminalId } from '../src/registry.js'
-import { buildUserNotice, createEndpoint, detectControllerChange, type EndpointCoreConfig } from '../src/endpoint.js'
+import { buildUserNotice, createEndpoint, detectControllerChange, type Endpoint, type EndpointCoreConfig, type OpenedTerminal, type OwnerAgent } from '../src/endpoint.js'
 import { FakeController, makeAgent } from './helpers/fake-controller.js'
 import type { WebTerminalInfoShadow } from '../src/shadow.js'
 
@@ -33,6 +33,13 @@ function makeCore() {
   const registry = new EndpointRegistry()
   const endpoint = createEndpoint(controller, registry, CONFIG)
   return { controller, registry, endpoint }
+}
+
+/** Open one terminal narrowed to the `opened` outcome (the fake never quota-fails here). */
+async function openOne(endpoint: Endpoint, owner: OwnerAgent): Promise<OpenedTerminal> {
+  const opened = await endpoint.open(owner, {})
+  if (opened.outcome !== 'opened') throw new Error(`expected outcome 'opened', got '${opened.outcome}'`)
+  return opened
 }
 
 describe('mintTerminalId', () => {
@@ -113,16 +120,16 @@ describe('TranscriptBuffer', () => {
 })
 
 describe('detectControllerChange', () => {
-  const info = (controllerId?: string): WebTerminalInfoShadow => ({
+  const info = (state: 'running' | 'exited' | 'failed' = 'running'): WebTerminalInfoShadow => ({
     id: 'stb-1-x', title: 't', shell: { path: '/bin/sh', args: [], name: 'sh' },
-    cwd: '/w', cols: 80, rows: 24, state: 'running', exitCode: null,
-    ...(controllerId === undefined ? {} : { controllerId }),
+    cwd: '/w', cols: 80, rows: 24, state, exitCode: state === 'running' ? null : 0,
   })
 
-  it('classifies control states', () => {
-    expect(detectControllerChange(info('ours'), 'ours')).toBe('ours')
-    expect(detectControllerChange(info('user'), 'ours')).toBe('user')
-    expect(detectControllerChange(info(), 'ours')).toBe('unattached')
+  it('classifies control states from the writable bit', () => {
+    expect(detectControllerChange(info(), true)).toBe('ours')
+    expect(detectControllerChange(info(), false)).toBe('user')
+    expect(detectControllerChange(info('exited'), false)).toBe('unattached')
+    expect(detectControllerChange(info('failed'), false)).toBe('unattached')
   })
 })
 
@@ -152,7 +159,7 @@ describe('endpoint core', () => {
   it('opens a terminal with an stb- id and follows as the input controller', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     expect(opened).toMatchObject({
       outcome: 'opened',
       state: 'running',
@@ -163,7 +170,7 @@ describe('endpoint core', () => {
     })
     expect(opened.terminalId).toMatch(/^stb-[\w-]{1,120}$/)
     await settle()
-    expect(controller.attachCount.filter(entry => entry.id === opened.terminalId)).toHaveLength(1)
+    expect(controller.attachCount.filter(id => id === opened.terminalId)).toHaveLength(1)
     const listed = endpoint.list(agent)
     expect(listed).toHaveLength(1)
     expect(listed[0]).toMatchObject({ terminalId: opened.terminalId, controller: 'plugin', state: 'running' })
@@ -187,7 +194,7 @@ describe('endpoint core', () => {
   it('sanitizes streamed output into the transcript and serves paged reads', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     controller.emitOutput(opened.terminalId, '\x1b[32m$ make\x1b[0m\nBUILD OK\n')
     await settle()
     const page = endpoint.read(agent, opened.terminalId, { offset: 0, count: 50 })
@@ -199,7 +206,7 @@ describe('endpoint core', () => {
   it('waits for a pattern over the transcript and reports the match', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     controller.emitOutput(opened.terminalId, 'compiling\n')
     void (async () => {
       await new Promise(resolve => { setTimeout(resolve, 10) })
@@ -212,14 +219,14 @@ describe('endpoint core', () => {
   it('regains control on send when the user holds it', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     await settle()
     controller.userTakeover(opened.terminalId)
     await settle()
     const result = await endpoint.send(agent, opened.terminalId, 'ping -n 2 127.0.0.1')
     expect(result).toMatchObject({ regained_control: true, wrote: expect.any(Number), state: 'running' })
-    // exactly two attachments: initial follow + the regain re-follow
-    expect(controller.attachCount.filter(entry => entry.id === opened.terminalId)).toHaveLength(2)
+    // exactly two attachments: initial attach + the regain re-attach
+    expect(controller.attachCount.filter(id => id === opened.terminalId)).toHaveLength(2)
     // the write landed under the new attachment
     expect(controller.writes.filter(write => write.id === opened.terminalId)).toHaveLength(1)
     const listed = endpoint.list(agent)
@@ -229,7 +236,7 @@ describe('endpoint core', () => {
   it('sends without the trailing carriage return when enter is false', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     await settle()
     await endpoint.send(agent, opened.terminalId, 'partial', { enter: false })
     expect(controller.writes[0]?.data).toBe('partial')
@@ -238,11 +245,11 @@ describe('endpoint core', () => {
   it('notifies the agent once per user-takeover episode and re-arms after regain', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     await settle()
-    controller.userTakeover(opened.terminalId, 'user-a')
+    controller.userTakeover(opened.terminalId)
     await settle()
-    controller.userTakeover(opened.terminalId, 'user-b')
+    controller.userTakeover(opened.terminalId)
     await settle()
     expect(agent.inject).toHaveBeenCalledTimes(1)
     const notice = agent.inject.mock.calls[0]?.[0] as { source?: { kind?: string; form?: string } }
@@ -250,7 +257,7 @@ describe('endpoint core', () => {
     // model send reclaims control; a later takeover is a new episode
     await endpoint.send(agent, opened.terminalId, 'whoami')
     await settle()
-    controller.userTakeover(opened.terminalId, 'user-c')
+    controller.userTakeover(opened.terminalId)
     await settle()
     expect(agent.inject).toHaveBeenCalledTimes(2)
   })
@@ -258,7 +265,7 @@ describe('endpoint core', () => {
   it('reports exited from wait_for once the process state is exited', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     controller.emitState(opened.terminalId, { state: 'exited', exitCode: 3 })
     await settle()
     const outcome = await endpoint.waitFor(agent, opened.terminalId, { pattern: 'never' }, new AbortController().signal)
@@ -270,7 +277,7 @@ describe('endpoint core', () => {
   it('closes the terminal, stops the follower, and empties the registry', async () => {
     const { controller, endpoint, registry } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     await settle()
     const result = await endpoint.close(agent, opened.terminalId)
     expect(result).toEqual({ closed: true, terminalId: opened.terminalId })
@@ -286,7 +293,7 @@ describe('endpoint core', () => {
     const { endpoint } = makeCore()
     const agentA = makeAgent('sess-a')
     const agentB = makeAgent('sess-b')
-    const opened = await endpoint.open(agentA, {})
+    const opened = await openOne(endpoint, agentA)
     expect(endpoint.list(agentB)).toEqual([])
     expect(() => endpoint.read(agentB, opened.terminalId, {})).toThrow(/unknown sidebar terminal/)
     await expect(endpoint.send(agentB, opened.terminalId, 'x')).rejects.toThrow(/unknown sidebar terminal/)
@@ -299,7 +306,7 @@ describe('endpoint core', () => {
   it('returns gone from wait_for when the terminal is closed mid-wait', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     controller.emitOutput(opened.terminalId, 'starting\n')
     void (async () => {
       await new Promise(resolve => { setTimeout(resolve, 10) })
@@ -312,13 +319,14 @@ describe('endpoint core', () => {
   it('does not notify for takeovers the plugin itself caused', async () => {
     const { controller, endpoint } = makeCore()
     const agent = makeAgent('sess-1')
-    const opened = await endpoint.open(agent, {})
+    const opened = await openOne(endpoint, agent)
     await settle()
-    // our own re-follow (regain) broadcasts state with our new attachment; no notice may fire
+    // our own re-attach (regain) broadcasts state with the old followers'
+    // lost writability; the disposed channel drops those frames — no notice
     await endpoint.send(agent, opened.terminalId, 'echo hi')
     await settle()
     expect(agent.inject).not.toHaveBeenCalled()
-    // ... and the initial attach broadcast never fired one either
+    // ... and a state broadcast while we still hold control never fires one
     controller.emitState(opened.terminalId, {})
     await settle()
     expect(agent.inject).not.toHaveBeenCalled()

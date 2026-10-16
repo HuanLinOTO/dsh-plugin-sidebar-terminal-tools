@@ -1,11 +1,11 @@
 /**
  * ANSI/control-code cleaning for terminal transcripts.
  *
- * The follow stream delivers a serialized xterm screen (`snapshot`) and raw
- * PTY deltas (`output`), both full of escape sequences. The transcript keeps
- * plain text only: CSI/OSC/DCS and nF escapes are removed, single-character
- * control codes are removed, and newlines are preserved as the sole line
- * separator (a CRLF pair therefore becomes one `\n`).
+ * The attachment stream delivers a serialized xterm screen (`snapshot`) and
+ * raw PTY deltas (`output`), both full of escape sequences. The transcript
+ * keeps plain text only: CSI/OSC/DCS and nF escapes are removed,
+ * single-character control codes are removed, and newlines are preserved as
+ * the sole line separator (a CRLF pair therefore becomes one `\n`).
  *
  * @module @huanlin/dsh-plugin-sidebar-terminal-tools/sanitize
  */

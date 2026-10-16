@@ -5,6 +5,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
+import type { TerminalInputShadow, TerminalOwnerLike } from '../src/shadow.js'
 
 vi.mock('@deepseek-ai/dsh-tools', () => ({
   defineTool: vi.fn((options: unknown) => options),
@@ -31,6 +32,11 @@ interface Harness {
   controller: FakeController
 }
 
+/** The invocation a derived fake context carries (see makeHarness). */
+interface FakeInvocation {
+  uplink(): AsyncIterable<TerminalInputShadow>
+}
+
 function makeHarness(config: PluginConfig = {}): Harness {
   const registered: CapturedTool[] = []
   const controller = new FakeController()
@@ -42,7 +48,24 @@ function makeHarness(config: PluginConfig = {}): Harness {
       },
     },
     effect: vi.fn((fn: () => unknown) => { return () => { void fn } }),
-    terminalController: controller,
+    // Cordis stand-in faithful enough for the real terminalSurfaceOf adapter:
+    // extend() prototypally derives a child context, and the service property
+    // resolves through it, so terminal/attach reads the synthesized
+    // invocation's uplink exactly like the gateway-bound service view does.
+    extend(meta: Record<string, unknown>) {
+      return Object.assign(Object.create(this as object), meta)
+    },
+    get terminalController() {
+      const invocation = (this as { invocation?: FakeInvocation }).invocation
+      if (invocation === undefined) return controller
+      return {
+        create: controller.create.bind(controller),
+        attach: (owner: TerminalOwnerLike, id: string, signal: AbortSignal) =>
+          controller.attach(owner, id, invocation.uplink(), signal),
+        close: controller.close.bind(controller),
+        list: controller.list.bind(controller),
+      }
+    },
   } as unknown as Context
   apply(ctx, config)
   return { ctx, registered, controller }
