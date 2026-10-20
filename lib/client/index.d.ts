@@ -6,6 +6,11 @@
  * opens each `stb-`-prefixed terminal with `ctx.sidebarRight.openTabIn`.
  *
  * Notes on the consumed surfaces (verified against the 0.2.0-rc.1 sources):
+ * - `recover(sessionId, refresh)` reads the Client's settled terminal
+ *   inventory unless `refresh` is true. A cached read never discovers a
+ *   terminal created after the first poll settled (the Host list is not
+ *   pushed), so the poll passes `refresh: true` — with `false` a terminal
+ *   opened into a page that was already running stayed invisible,
  * - `recover` already excludes terminals this window shows and terminals with
  *   unfinished closes, so the poll is naturally idempotent; the local `opened`
  *   set additionally guards the window between poll and tab mount,
@@ -39,7 +44,7 @@ interface SidebarRightLike {
 /** The structural context slice the client half consumes. */
 export interface ClientContext {
     readonly webTerminals: {
-        recover(sessionId: string): Promise<readonly RecoveredTerminal[]>;
+        recover(sessionId: string, refresh?: boolean): Promise<readonly RecoveredTerminal[]>;
     };
     readonly sidebarRight: SidebarRightLike;
     readonly locale: {

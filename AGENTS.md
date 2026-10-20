@@ -27,7 +27,7 @@ Bundle + dual-half DSH plugin (`@huanlin/dsh-plugin-sidebar-terminal-tools`) bri
 | `src/sanitize.ts` | ANSI/control-code stripping (keeps `\n` only) |
 | `src/shadow.ts` | Structural shadow of the terminal controller (duplex `attach`), `RemoteInvocationShadow`, `terminalSurfaceOf` adapter, `remoteErrorCode/Details` |
 | `src/wait-for.ts` | Retrieved wait core (do not reformat; upstream at huanlinoto/dsh-plugin-terminal-extension-wait-for@4dae4b8) |
-| `src/client/index.ts` | Client half: poll loop over `webTerminals.recover` + `sidebarRight.openTabIn` |
+| `src/client/index.ts` | Client half: poll loop over `webTerminals.recover(sessionId, true)` + `sidebarRight.openTabIn` |
 | `src/client/pick.ts` | Pure `pickUnopened(prefix, recovered, openedIds)` |
 | `src/client/locales.ts` | Bilingual client strings (`ctx.locale.resolveText`) |
 | `tests/` | vitest: wait-for (23), sanitize, endpoint (fake surface), tools (mocked defineTool + real `terminalSurfaceOf` over a cordis-stand-in ctx), client-pick + loop |
@@ -54,6 +54,7 @@ pnpm run build        # tsdown host → tsc client d.ts → tsdown client bundle
 ## Gotchas
 
 - Upstream caps one input command at `maxInputBytes` (default 64 KiB): an oversized `write` fails the whole attachment stream (surfaced as an infrastructure error, not an ack refusal) — keep `sidebar_terminal_send` payloads under it.
+- `webTerminals.recover(sessionId, refresh)` reads the Client's settled inventory when `refresh` is false and the Host never pushes its terminal list, so an auto-open poll MUST pass `true`: with the cached read, a terminal created after the first poll settled never produced a tab (fixed in 0.2.1).
 - `openTabIn` expands the sidebar column (upstream: "an open behind a collapsed panel is not an open") but does not steal keyboard focus; there is no background-open option.
 - `exports["./client"]` must use a `default` condition (string) — `client-modules`'s `clientExportOf` only accepts a string or an object with a string `default`; an `import`-only condition throws at boot.
 - The client bundle must have zero runtime imports (services only through `ctx`); a stray value import fails the module table at runtime and the loader purity rules upstream.

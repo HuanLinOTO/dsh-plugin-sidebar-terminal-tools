@@ -52,7 +52,7 @@ interface LoopHarness {
 
 function makeLoopHarness(recoveredBySession: Record<string, { id: string }[]>): LoopHarness {
   const openTabIn = vi.fn()
-  const recover = vi.fn(async (sessionId: string) => recoveredBySession[sessionId] ?? [])
+  const recover = vi.fn(async (sessionId: string, _refresh?: boolean) => recoveredBySession[sessionId] ?? [])
   const disposers: Array<() => void> = []
   const ctx = {
     webTerminals: { recover },
@@ -89,6 +89,17 @@ describe('auto-open loop', () => {
     expect(harness.openTabIn).toHaveBeenCalledTimes(2)
     expect(harness.openTabIn).toHaveBeenCalledWith('sess-1', 'terminal', { params: { terminalId: 'stb-1-a' } })
     expect(harness.openTabIn).toHaveBeenCalledWith('sess-3', 'terminal', { params: { terminalId: 'stb-3-a' } })
+    harness.dispose()
+  })
+
+  it('asks for refreshed discovery on every poll so later terminals appear', async () => {
+    const harness = makeLoopHarness({ 'sess-1': [info('stb-1-a')] })
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(harness.recover).toHaveBeenCalled()
+    for (const call of harness.recover.mock.calls) {
+      expect(call[1]).toBe(true)
+    }
     harness.dispose()
   })
 
