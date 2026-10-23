@@ -63,19 +63,19 @@ dsh plugin --profile web add link:D:\Projects\deepseek-harness\dsh-plugin-sideba
 | `tailLines` / `maxLineTextChars` / `maxTailBytes` | `30` / `1000` / `8192` | `wait_for` 摘录边界 |
 | `maxMessageChars` | `2000` | 用户接管提醒的长度上限 |
 
-Client half（web 客户端配置层）可配 `pollIntervalMs`（侧栏自动打开的轮询间隔，默认 3000ms，最小 250ms）。
+Client half（web 客户端配置层）可配 `pollIntervalMs`（活动窗口内的发现间隔，默认 3000ms，最小 250ms）。空闲时**不发任何请求**——见下方 Client half 说明。
 
 ## 架构 / Architecture
 
 - **Host half**（`src/index.ts` + `endpoint/attachment/registry/sanitize/wait-for`）：结构影子类型消费 `ctx.terminalController`（**不 import** `@deepseek-ai/dsh-api-terminal-controller`）；每条终端一个 duplex `attach` 消费者（host 侧经合成 Remote invocation——gateway 分发同款 `ctx.extend` 机制——取得 `RemoteStream`，编号 `TerminalInput` 命令上行、`snapshot`/`output`/`state`/`ack` 帧下行），`snapshot`/`output` 经 ANSI 清洗进有界转录，`state` 帧维护 `state/exitCode` 并以 `writable` 位判定输入控制权（0.2.1 起上游移除 `info.controllerId`），用户接管时 `agent.inject` 一条提醒（同一接管会话只提醒一次）。
-- **Client half**（`src/client/`，产物 `lib/client.js` 以 `window.__ModuleLoader__.load({ id: <package name>, factory })` 注册）：每 3 秒轮询 `ctx.webTerminals.recover(sessionId, true)`（**必须带 `refresh`**：Host 不推送终端列表，缓存读会让页面打开之后新开的终端永远不出现），把 `stb-` 前缀终端用 `ctx.sidebarRight.openTabIn()` 开成官方 terminal tab。`openTabIn` 会展开侧栏列但**不抢键盘焦点**；上游本就把它设计为"打开即可见"。
+- **Client half**（`src/client/`，产物 `lib/client.js` 以 `window.__ModuleLoader__.load({ id: <package name>, factory })` 注册）：**按活动窗口发现**，不空闲轮询。Host 不推送终端列表，每次发现都是一次 `POST /api/terminal/list` 往返，因此不再按定时器轮询所有会话，而是订阅宿主转发的 `api-session/status` Remote Event（`ctx.remote.$on`，每回合 idle ⇄ running 各一次）：`running: true` 打开该 Session 的活动窗口，窗口内每 `pollIntervalMs` 调一次 `ctx.webTerminals.recover(sessionId, true)`（**必须带 `refresh`**，缓存读会让回合中新开的终端永远不出现）；`running: false` 关窗并收尾查一次；空闲页面零请求。窗口上限 `MAX_ACTIVITY_WINDOW_MS`（10 分钟）防止状态事件丢失导致无限轮询；宿主不支持转发事件（`interactions=none`）时退回旧的定时轮询。发现的 `stb-` 前缀终端用 `ctx.sidebarRight.openTabIn()` 开成官方 terminal tab，`openTabIn` 会展开侧栏列但**不抢键盘焦点**；上游本就把它设计为"打开即可见"。
 - 上游若在未来版本提供官方自动恢复，client half 应退役，只保留工具层。
 
 ## 开发 / Development
 
 ```sh
 pnpm install        # 需要本地 DSH checkout 的 link: devDependencies
-pnpm test           # vitest（79 例：wait_for 核心 23 + sanitize/endpoint/tools/client）
+pnpm test           # vitest（84 例：wait_for 核心 23 + sanitize/endpoint/tools/client）
 pnpm run typecheck  # host + client 两个 tsconfig
 pnpm run build      # lib/index.js（host）+ lib/client/*.d.ts + lib/client.js（client bundle）
 ```
